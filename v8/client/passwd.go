@@ -1,7 +1,9 @@
 package client
 
 import (
+	"context"
 	"fmt"
+	"time"
 
 	"github.com/matchaxnb/gokrb5/v8/kadmin"
 	"github.com/matchaxnb/gokrb5/v8/messages"
@@ -21,6 +23,13 @@ const (
 
 // ChangePasswd changes the password of the client to the value provided.
 func (cl *Client) ChangePasswd(newPasswd string) (bool, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	return cl.ChangePasswdContext(ctx, newPasswd)
+}
+
+// ChangePasswd changes the password of the client to the value provided.
+func (cl *Client) ChangePasswdContext(ctx context.Context, newPasswd string) (bool, error) {
 	ASReq, err := messages.NewASReqForChgPasswd(cl.Credentials.Domain(), cl.Config, cl.Credentials.CName())
 	if err != nil {
 		return false, err
@@ -34,7 +43,7 @@ func (cl *Client) ChangePasswd(newPasswd string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	r, err := cl.sendToKPasswd(msg)
+	r, err := cl.sendToKPasswd(ctx, msg)
 	if err != nil {
 		return false, err
 	}
@@ -49,7 +58,7 @@ func (cl *Client) ChangePasswd(newPasswd string) (bool, error) {
 	return true, nil
 }
 
-func (cl *Client) sendToKPasswd(msg kadmin.Request) (r kadmin.Reply, err error) {
+func (cl *Client) sendToKPasswd(ctx context.Context, msg kadmin.Request) (r kadmin.Reply, err error) {
 	_, kps, err := cl.Config.GetKpasswdServers(cl.Credentials.Domain(), true)
 	if err != nil {
 		return
@@ -60,12 +69,12 @@ func (cl *Client) sendToKPasswd(msg kadmin.Request) (r kadmin.Reply, err error) 
 	}
 	var rb []byte
 	if len(b) <= cl.Config.LibDefaults.UDPPreferenceLimit {
-		rb, err = dialSendUDP(kps, b)
+		rb, err = dialSendUDP(ctx, kps, b)
 		if err != nil {
 			return
 		}
 	} else {
-		rb, err = dialSendTCP(kps, b)
+		rb, err = dialSendTCP(ctx, kps, b)
 		if err != nil {
 			return
 		}

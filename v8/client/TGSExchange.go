@@ -1,6 +1,9 @@
 package client
 
 import (
+	"context"
+	"time"
+
 	"github.com/matchaxnb/gokrb5/v8/iana/flags"
 	"github.com/matchaxnb/gokrb5/v8/iana/nametype"
 	"github.com/matchaxnb/gokrb5/v8/krberror"
@@ -10,6 +13,12 @@ import (
 
 // TGSREQGenerateAndExchange generates the TGS_REQ and performs a TGS exchange to retrieve a ticket to the specified SPN.
 func (cl *Client) TGSREQGenerateAndExchange(spn types.PrincipalName, kdcRealm string, tgt messages.Ticket, sessionKey types.EncryptionKey, renewal bool) (tgsReq messages.TGSReq, tgsRep messages.TGSRep, err error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	return cl.TGSREQGenerateAndExchangeContext(ctx, spn, kdcRealm, tgt, sessionKey, renewal)
+}
+
+func (cl *Client) TGSREQGenerateAndExchangeContext(ctx context.Context, spn types.PrincipalName, kdcRealm string, tgt messages.Ticket, sessionKey types.EncryptionKey, renewal bool) (tgsReq messages.TGSReq, tgsRep messages.TGSRep, err error) {
 	tgsReq, err = messages.NewTGSReq(cl.Credentials.CName(), kdcRealm, cl.Config, tgt, sessionKey, spn, renewal)
 	if err != nil {
 		return tgsReq, tgsRep, krberror.Errorf(err, krberror.KRBMsgError, "TGS Exchange Error: failed to generate a new TGS_REQ")
@@ -21,12 +30,21 @@ func (cl *Client) TGSREQGenerateAndExchange(spn types.PrincipalName, kdcRealm st
 // Referrals are automatically handled.
 // The client's cache is updated with the ticket received.
 func (cl *Client) TGSExchange(tgsReq messages.TGSReq, kdcRealm string, tgt messages.Ticket, sessionKey types.EncryptionKey, referral int) (messages.TGSReq, messages.TGSRep, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	return cl.TGSExchangeContext(ctx, tgsReq, kdcRealm, tgt, sessionKey, referral)
+}
+
+// TGSExchange exchanges the provided TGS_REQ with the KDC to retrieve a TGS_REP.
+// Referrals are automatically handled.
+// The client's cache is updated with the ticket received.
+func (cl *Client) TGSExchangeContext(ctx context.Context, tgsReq messages.TGSReq, kdcRealm string, tgt messages.Ticket, sessionKey types.EncryptionKey, referral int) (messages.TGSReq, messages.TGSRep, error) {
 	var tgsRep messages.TGSRep
 	b, err := tgsReq.Marshal()
 	if err != nil {
 		return tgsReq, tgsRep, krberror.Errorf(err, krberror.EncodingError, "TGS Exchange Error: failed to marshal TGS_REQ")
 	}
-	r, err := cl.sendToKDC(b, kdcRealm)
+	r, err := cl.sendToKDC(ctx, b, kdcRealm)
 	if err != nil {
 		if _, ok := err.(messages.KRBError); ok {
 			return tgsReq, tgsRep, krberror.Errorf(err, krberror.KDCError, "TGS Exchange Error: kerberos error response from KDC when requesting for %s", tgsReq.ReqBody.SName.PrincipalNameString())
@@ -82,6 +100,15 @@ func (cl *Client) TGSExchange(tgsReq messages.TGSReq, kdcRealm string, tgt messa
 // SPN format: <SERVICE>/<FQDN> Eg. HTTP/www.example.com
 // The ticket will be added to the client's ticket cache
 func (cl *Client) GetServiceTicket(spn string) (messages.Ticket, types.EncryptionKey, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	return cl.GetServiceTicketContext(ctx, spn)
+}
+
+// GetServiceTicketContext makes a request to get a service ticket for the SPN specified
+// SPN format: <SERVICE>/<FQDN> Eg. HTTP/www.example.com
+// The ticket will be added to the client's ticket cache
+func (cl *Client) GetServiceTicketContext(ctx context.Context, spn string) (messages.Ticket, types.EncryptionKey, error) {
 	var tkt messages.Ticket
 	var skey types.EncryptionKey
 	if tkt, skey, ok := cl.GetCachedTicket(spn); ok {
@@ -96,11 +123,11 @@ func (cl *Client) GetServiceTicket(spn string) (messages.Ticket, types.Encryptio
 		realm = cl.Credentials.Realm()
 	}
 
-	tgt, skey, err := cl.sessionTGT(realm)
+	tgt, skey, err := cl.sessionTGT(ctx, realm)
 	if err != nil {
 		return tkt, skey, err
 	}
-	_, tgsRep, err := cl.TGSREQGenerateAndExchange(princ, realm, tgt, skey, false)
+	_, tgsRep, err := cl.TGSREQGenerateAndExchangeContext(ctx, princ, realm, tgt, skey, false)
 	if err != nil {
 		return tkt, skey, err
 	}

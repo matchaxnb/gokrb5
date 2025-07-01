@@ -1,6 +1,7 @@
 package client
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"sort"
@@ -198,7 +199,9 @@ func (cl *Client) enableAutoSessionRenewal(s *session) {
 			timer = time.NewTimer(w)
 			select {
 			case <-timer.C:
-				renewal, err := cl.refreshSession(s)
+				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				renewal, err := cl.refreshSession(ctx, s)
+				cancel()
 				if err != nil {
 					cl.Log("error refreshing session: %v", err)
 				}
@@ -234,7 +237,7 @@ func (cl *Client) renewTGT(s *session) error {
 
 // refreshSession updates either through renewal or creating a new login.
 // The boolean indicates if the update was a renewal.
-func (cl *Client) refreshSession(s *session) (bool, error) {
+func (cl *Client) refreshSession(ctx context.Context, s *session) (bool, error) {
 	s.mux.RLock()
 	realm := s.realm
 	renewTill := s.renewTill
@@ -244,12 +247,12 @@ func (cl *Client) refreshSession(s *session) (bool, error) {
 		err := cl.renewTGT(s)
 		return true, err
 	}
-	err := cl.realmLogin(realm)
+	err := cl.realmLogin(ctx, realm)
 	return false, err
 }
 
 // ensureValidSession makes sure there is a valid session for the realm
-func (cl *Client) ensureValidSession(realm string) error {
+func (cl *Client) ensureValidSession(ctx context.Context, realm string) error {
 	s, ok := cl.sessions.get(realm)
 	if ok {
 		s.mux.RLock()
@@ -259,15 +262,15 @@ func (cl *Client) ensureValidSession(realm string) error {
 			return nil
 		}
 		s.mux.RUnlock()
-		_, err := cl.refreshSession(s)
+		_, err := cl.refreshSession(ctx, s)
 		return err
 	}
-	return cl.realmLogin(realm)
+	return cl.realmLogin(ctx, realm)
 }
 
 // sessionTGTDetails is a thread safe way to get the TGT and session key values for a realm
-func (cl *Client) sessionTGT(realm string) (tgt messages.Ticket, sessionKey types.EncryptionKey, err error) {
-	err = cl.ensureValidSession(realm)
+func (cl *Client) sessionTGT(ctx context.Context, realm string) (tgt messages.Ticket, sessionKey types.EncryptionKey, err error) {
+	err = cl.ensureValidSession(ctx, realm)
 	if err != nil {
 		return
 	}

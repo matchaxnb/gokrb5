@@ -1,6 +1,7 @@
 package config
 
 import (
+	"context"
 	"fmt"
 	"math/rand"
 	"net"
@@ -12,6 +13,11 @@ import (
 
 // GetKDCs returns the count of KDCs available and a map of KDC host names keyed on preference order.
 func (c *Config) GetKDCs(realm string, tcp bool) (int, map[int]string, error) {
+	return c.GetKDCsContext(context.Background(), realm, tcp)
+}
+
+// GetKDCs returns the count of KDCs available and a map of KDC host names keyed on preference order.
+func (c *Config) GetKDCsContext(ctx context.Context, realm string, tcp bool) (int, map[int]string, error) {
 	if realm == "" {
 		realm = c.LibDefaults.DefaultRealm
 	}

@@ -2,6 +2,7 @@
 package client
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -165,6 +166,11 @@ func (cl *Client) IsConfigured() (bool, error) {
 
 // Login the client with the KDC via an AS exchange.
 func (cl *Client) Login() error {
+	return cl.LoginContext(context.Background())
+}
+
+// Login the client with the KDC via an AS exchange.
+func (cl *Client) LoginContext(ctx context.Context) error {
 	if ok, err := cl.IsConfigured(); !ok {
 		return err
 	}
@@ -183,7 +189,7 @@ func (cl *Client) Login() error {
 	if err != nil {
 		return krberror.Errorf(err, krberror.KRBMsgError, "error generating new AS_REQ")
 	}
-	ASRep, err := cl.ASExchange(cl.Credentials.Domain(), ASReq, 0)
+	ASRep, err := cl.ASExchangeContext(ctx, cl.Credentials.Domain(), ASReq, 0)
 	if err != nil {
 		return err
 	}
@@ -193,9 +199,16 @@ func (cl *Client) Login() error {
 
 // AffirmLogin will only perform an AS exchange with the KDC if the client does not already have a TGT.
 func (cl *Client) AffirmLogin() error {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	return cl.AffirmLoginContext(ctx)
+}
+
+// AffirmLoginContext will only perform an AS exchange with the KDC if the client does not already have a TGT.
+func (cl *Client) AffirmLoginContext(ctx context.Context) error {
 	_, endTime, _, _, err := cl.sessionTimes(cl.Credentials.Domain())
 	if err != nil || time.Now().UTC().After(endTime) {
-		err := cl.Login()
+		err := cl.LoginContext(ctx)
 		if err != nil {
 			return fmt.Errorf("could not get valid TGT for client's realm: %v", err)
 		}
@@ -204,7 +217,7 @@ func (cl *Client) AffirmLogin() error {
 }
 
 // realmLogin obtains or renews a TGT and establishes a session for the realm specified.
-func (cl *Client) realmLogin(realm string) error {
+func (cl *Client) realmLogin(ctx context.Context, realm string) error {
 	if realm == cl.Credentials.Domain() {
 		return cl.Login()
 	}
@@ -215,7 +228,7 @@ func (cl *Client) realmLogin(realm string) error {
 			return fmt.Errorf("could not get valid TGT for client's realm: %v", err)
 		}
 	}
-	tgt, skey, err := cl.sessionTGT(cl.Credentials.Domain())
+	tgt, skey, err := cl.sessionTGT(ctx, cl.Credentials.Domain())
 	if err != nil {
 		return err
 	}
@@ -225,7 +238,7 @@ func (cl *Client) realmLogin(realm string) error {
 		NameString: []string{"krbtgt", realm},
 	}
 
-	_, tgsRep, err := cl.TGSREQGenerateAndExchange(spn, cl.Credentials.Domain(), tgt, skey, false)
+	_, tgsRep, err := cl.TGSREQGenerateAndExchangeContext(ctx, spn, cl.Credentials.Domain(), tgt, skey, false)
 	if err != nil {
 		return err
 	}
@@ -245,6 +258,13 @@ func (cl *Client) Destroy() {
 
 // Diagnostics runs a set of checks that the client is properly configured and writes details to the io.Writer provided.
 func (cl *Client) Diagnostics(w io.Writer) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	return cl.DiagnosticsContext(ctx, w)
+}
+
+// DiagnosticsContext runs a set of checks that the client is properly configured and writes details to the io.Writer provided.
+func (cl *Client) DiagnosticsContext(ctx context.Context, w io.Writer) error {
 	cl.Print(w)
 	var errs []string
 	if cl.Credentials.HasKeytab() {
@@ -279,7 +299,7 @@ func (cl *Client) Diagnostics(w io.Writer) error {
 			}
 		}
 	}
-	udpCnt, udpKDC, err := cl.Config.GetKDCs(cl.Credentials.Realm(), false)
+	udpCnt, udpKDC, err := cl.Config.GetKDCsContext(ctx, cl.Credentials.Realm(), false)
 	if err != nil {
 		errs = append(errs, fmt.Sprintf("error when resolving KDCs for UDP communication: %v", err))
 	}
@@ -289,7 +309,7 @@ func (cl *Client) Diagnostics(w io.Writer) error {
 		b, _ := json.MarshalIndent(&udpKDC, "", "  ")
 		fmt.Fprintf(w, "UDP KDCs: %s\n", string(b))
 	}
-	tcpCnt, tcpKDC, err := cl.Config.GetKDCs(cl.Credentials.Realm(), false)
+	tcpCnt, tcpKDC, err := cl.Config.GetKDCsContext(ctx, cl.Credentials.Realm(), false)
 	if err != nil {
 		errs = append(errs, fmt.Sprintf("error when resolving KDCs for TCP communication: %v", err))
 	}

@@ -1,6 +1,9 @@
 package client
 
 import (
+	"context"
+	"time"
+
 	"github.com/matchaxnb/gokrb5/v8/crypto"
 	"github.com/matchaxnb/gokrb5/v8/crypto/etype"
 	"github.com/matchaxnb/gokrb5/v8/iana/errorcode"
@@ -13,6 +16,12 @@ import (
 
 // ASExchange performs an AS exchange for the client to retrieve a TGT.
 func (cl *Client) ASExchange(realm string, ASReq messages.ASReq, referral int) (messages.ASRep, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	return cl.ASExchangeContext(ctx, realm, ASReq, referral)
+}
+
+func (cl *Client) ASExchangeContext(ctx context.Context, realm string, ASReq messages.ASReq, referral int) (messages.ASRep, error) {
 	if ok, err := cl.IsConfigured(); !ok {
 		return messages.ASRep{}, krberror.Errorf(err, krberror.ConfigError, "AS Exchange cannot be performed")
 	}
@@ -29,7 +38,7 @@ func (cl *Client) ASExchange(realm string, ASReq messages.ASReq, referral int) (
 	}
 	var ASRep messages.ASRep
 
-	rb, err := cl.sendToKDC(b, realm)
+	rb, err := cl.sendToKDC(ctx, b, realm)
 	if err != nil {
 		if e, ok := err.(messages.KRBError); ok {
 			switch e.ErrorCode {
@@ -44,7 +53,7 @@ func (cl *Client) ASExchange(realm string, ASReq messages.ASReq, referral int) (
 				if err != nil {
 					return messages.ASRep{}, krberror.Errorf(err, krberror.EncodingError, "AS Exchange Error: failed marshaling AS_REQ with PAData")
 				}
-				rb, err = cl.sendToKDC(b, realm)
+				rb, err = cl.sendToKDC(ctx, b, realm)
 				if err != nil {
 					if _, ok := err.(messages.KRBError); ok {
 						return messages.ASRep{}, krberror.Errorf(err, krberror.KDCError, "AS Exchange Error: kerberos error response from KDC")
@@ -57,7 +66,7 @@ func (cl *Client) ASExchange(realm string, ASReq messages.ASReq, referral int) (
 					return messages.ASRep{}, krberror.Errorf(err, krberror.KRBMsgError, "maximum number of client referrals exceeded")
 				}
 				referral++
-				return cl.ASExchange(e.CRealm, ASReq, referral)
+				return cl.ASExchangeContext(ctx, e.CRealm, ASReq, referral)
 			default:
 				return messages.ASRep{}, krberror.Errorf(err, krberror.KDCError, "AS Exchange Error: kerberos error response from KDC")
 			}

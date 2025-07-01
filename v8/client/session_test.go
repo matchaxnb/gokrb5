@@ -1,6 +1,7 @@
 package client
 
 import (
+	"context"
 	"encoding/hex"
 	"fmt"
 	"io"
@@ -21,6 +22,8 @@ import (
 func TestMultiThreadedClientSession(t *testing.T) {
 	test.Integration(t)
 
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
+	t.Cleanup(cancel)
 	b, _ := hex.DecodeString(testdata.KEYTAB_TESTUSER1_TEST_GOKRB5)
 	kt := keytab.New()
 	kt.Unmarshal(b)
@@ -55,7 +58,7 @@ func TestMultiThreadedClientSession(t *testing.T) {
 	for i := 0; i < 10; i++ {
 		go func() {
 			defer wg.Done()
-			tgt, _, err := cl.sessionTGT("TEST.GOKRB5")
+			tgt, _, err := cl.sessionTGT(ctx, "TEST.GOKRB5")
 			if err != nil || tgt.Realm != "TEST.GOKRB5" {
 				t.Logf("error getting session: %v", err)
 			}

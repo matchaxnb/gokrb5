@@ -1,23 +1,23 @@
 package client
 
 import (
+	"context"
 	"encoding/binary"
 	"fmt"
 	"io"
 	"net"
 	"strings"
-	"time"
 
 	"github.com/matchaxnb/gokrb5/v8/iana/errorcode"
 	"github.com/matchaxnb/gokrb5/v8/messages"
 )
 
 // SendToKDC performs network actions to send data to the KDC.
-func (cl *Client) sendToKDC(b []byte, realm string) ([]byte, error) {
+func (cl *Client) sendToKDC(ctx context.Context, b []byte, realm string) ([]byte, error) {
 	var rb []byte
 	if cl.Config.LibDefaults.UDPPreferenceLimit == 1 {
 		//1 means we should always use TCP
-		rb, errtcp := cl.sendKDCTCP(realm, b)
+		rb, errtcp := cl.sendKDCTCP(ctx, realm, b)
 		if errtcp != nil {
 			if e, ok := errtcp.(messages.KRBError); ok {
 				return rb, e
@@ -28,7 +28,7 @@ func (cl *Client) sendToKDC(b []byte, realm string) ([]byte, error) {
 	}
 	if len(b) <= cl.Config.LibDefaults.UDPPreferenceLimit {
 		//Try UDP first, TCP second
-		rb, errudp := cl.sendKDCUDP(realm, b)
+		rb, errudp := cl.sendKDCUDP(ctx, realm, b)
 		if errudp != nil {
 			if e, ok := errudp.(messages.KRBError); ok && e.ErrorCode != errorcode.KRB_ERR_RESPONSE_TOO_BIG {
 				// Got a KRBError from KDC
@@ -36,7 +36,7 @@ func (cl *Client) sendToKDC(b []byte, realm string) ([]byte, error) {
 				return rb, e
 			}
 			// Try TCP
-			r, errtcp := cl.sendKDCTCP(realm, b)
+			r, errtcp := cl.sendKDCTCP(ctx, realm, b)
 			if errtcp != nil {
 				if e, ok := errtcp.(messages.KRBError); ok {
 					// Got a KRBError
@@ -49,13 +49,13 @@ func (cl *Client) sendToKDC(b []byte, realm string) ([]byte, error) {
 		return rb, nil
 	}
 	//Try TCP first, UDP second
-	rb, errtcp := cl.sendKDCTCP(realm, b)
+	rb, errtcp := cl.sendKDCTCP(ctx, realm, b)
 	if errtcp != nil {
 		if e, ok := errtcp.(messages.KRBError); ok {
 			// Got a KRBError from KDC so returning and not trying UDP.
 			return rb, e
 		}
-		rb, errudp := cl.sendKDCUDP(realm, b)
+		rb, errudp := cl.sendKDCUDP(ctx, realm, b)
 		if errudp != nil {
 			if e, ok := errudp.(messages.KRBError); ok {
 				// Got a KRBError
@@ -68,13 +68,13 @@ func (cl *Client) sendToKDC(b []byte, realm string) ([]byte, error) {
 }
 
 // sendKDCUDP sends bytes to the KDC via UDP.
-func (cl *Client) sendKDCUDP(realm string, b []byte) ([]byte, error) {
+func (cl *Client) sendKDCUDP(ctx context.Context, realm string, b []byte) ([]byte, error) {
 	var r []byte
-	_, kdcs, err := cl.Config.GetKDCs(realm, false)
+	_, kdcs, err := cl.Config.GetKDCsContext(ctx, realm, false)
 	if err != nil {
 		return r, err
 	}
-	r, err = dialSendUDP(kdcs, b)
+	r, err = dialSendUDP(ctx, kdcs, b)
 	if err != nil {
 		return r, err
 	}
@@ -82,17 +82,21 @@ func (cl *Client) sendKDCUDP(realm string, b []byte) ([]byte, error) {
 }
 
 // dialSendUDP establishes a UDP connection to a KDC.
-func dialSendUDP(kdcs map[int]string, b []byte) ([]byte, error) {
+func dialSendUDP(ctx context.Context, kdcs map[int]string, b []byte) ([]byte, error) {
 	var errs []string
 	for i := 1; i <= len(kdcs); i++ {
-		conn, err := net.DialTimeout("udp", kdcs[i], 5*time.Second)
+		d := net.Dialer{}
+		conn, err := d.DialContext(ctx, "udp", kdcs[i])
 		if err != nil {
 			errs = append(errs, fmt.Sprintf("error establishing connection to %s: %v", kdcs[i], err))
 			continue
 		}
-		if err := conn.SetDeadline(time.Now().Add(5 * time.Second)); err != nil {
-			errs = append(errs, fmt.Sprintf("error setting deadline on connection to %s: %v", kdcs[i], err))
-			continue
+		dl, ok := ctx.Deadline()
+		if ok {
+			if err := conn.SetDeadline(dl); err != nil {
+				errs = append(errs, fmt.Sprintf("error setting deadline on connection to %s: %v", kdcs[i], err))
+				continue
+			}
 		}
 		// conn is guaranteed to be a UDPConn
 		rb, err := sendUDP(conn.(*net.UDPConn), b)
@@ -126,13 +130,13 @@ func sendUDP(conn *net.UDPConn, b []byte) ([]byte, error) {
 }
 
 // sendKDCTCP sends bytes to the KDC via TCP.
-func (cl *Client) sendKDCTCP(realm string, b []byte) ([]byte, error) {
+func (cl *Client) sendKDCTCP(ctx context.Context, realm string, b []byte) ([]byte, error) {
 	var r []byte
-	_, kdcs, err := cl.Config.GetKDCs(realm, true)
+	_, kdcs, err := cl.Config.GetKDCsContext(ctx, realm, true)
 	if err != nil {
 		return r, err
 	}
-	r, err = dialSendTCP(kdcs, b)
+	r, err = dialSendTCP(ctx, kdcs, b)
 	if err != nil {
 		return r, err
 	}
@@ -140,17 +144,21 @@ func (cl *Client) sendKDCTCP(realm string, b []byte) ([]byte, error) {
 }
 
 // dialKDCTCP establishes a TCP connection to a KDC.
-func dialSendTCP(kdcs map[int]string, b []byte) ([]byte, error) {
+func dialSendTCP(ctx context.Context, kdcs map[int]string, b []byte) ([]byte, error) {
 	var errs []string
 	for i := 1; i <= len(kdcs); i++ {
-		conn, err := net.DialTimeout("tcp", kdcs[i], 5*time.Second)
+		d := net.Dialer{}
+		conn, err := d.DialContext(ctx, "tcp", kdcs[i])
 		if err != nil {
 			errs = append(errs, fmt.Sprintf("error establishing connection to %s: %v", kdcs[i], err))
 			continue
 		}
-		if err := conn.SetDeadline(time.Now().Add(5 * time.Second)); err != nil {
-			errs = append(errs, fmt.Sprintf("error setting deadline on connection to %s: %v", kdcs[i], err))
-			continue
+		dl, ok := ctx.Deadline()
+		if ok {
+			if err := conn.SetDeadline(dl); err != nil {
+				errs = append(errs, fmt.Sprintf("error setting deadline on connection to %s: %v", kdcs[i], err))
+				continue
+			}
 		}
 		// conn is guaranteed to be a TCPConn
 		rb, err := sendTCP(conn.(*net.TCPConn), b)
