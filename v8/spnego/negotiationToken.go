@@ -54,7 +54,7 @@ type NegTokenResp struct {
 }
 
 type marshalNegTokenResp struct {
-	NegState      asn1.Enumerated       `asn1:"explicit,tag:0"`
+	NegState      asn1.Enumerated       `asn1:"explicit,optional,tag:0"`
 	SupportedMech asn1.ObjectIdentifier `asn1:"explicit,optional,tag:1"`
 	ResponseToken []byte                `asn1:"explicit,optional,omitempty,tag:2"`
 	MechListMIC   []byte                `asn1:"explicit,optional,omitempty,tag:3"` // This field is not used when negotiating Kerberos tokens
