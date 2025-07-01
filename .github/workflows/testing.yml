@@ -2,10 +2,12 @@ name: v7
 on:
   push:
     paths-ignore:
-    - 'v[0-9]+/**'
+      - 'v[0-9]+/**'
+      - '.github/workflows/testingv8.yml'
   pull_request:
     paths-ignore:
-    - 'v[0-9]+/**'
+      - 'v[0-9]+/**'
+      - '.github/workflows/testingv8.yml'
 
 jobs:
   build:

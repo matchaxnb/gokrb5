@@ -4,9 +4,11 @@ on:
   push:
     paths:
       - 'v8/**'
+      - '.github/workflows/testingv8.yml'
   pull_request:
     paths:
       - 'v8/**'
+      - '.github/workflows/testingv8.yml'
 
 jobs:
   build:
@@ -14,7 +16,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        go: [ '1.18.x', '1.19.x', '1.20.x' ]
+        go: [ 'oldstable', 'stable' ]
     env:
       TEST_KDC_ADDR: 127.0.0.1
       TEST_HTTP_URL: http://cname.test.gokrb5
