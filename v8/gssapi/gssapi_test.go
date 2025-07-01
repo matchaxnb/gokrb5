@@ -14,6 +14,7 @@ func TestOID(t *testing.T) {
 	}{
 		{OIDMSLegacyKRB5, []int{1, 2, 840, 48018, 1, 2, 2}},
 		{OIDKRB5, []int{1, 2, 840, 113554, 1, 2, 2}},
+		{OIDKRB5User2User, []int{1, 2, 840, 113554, 1, 2, 2, 3}},
 		{OIDSPNEGO, []int{1, 3, 6, 1, 5, 5, 2}},
 		{OIDGSSIAKerb, []int{1, 3, 6, 1, 5, 2, 5}},
 	}

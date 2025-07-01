@@ -1,6 +1,7 @@
 package gssapi
 
 import (
+	"bytes"
 	"encoding/binary"
 	"encoding/hex"
 	"testing"
@@ -113,6 +114,32 @@ func TestUnmarshalFailure_ChallengeReply(t *testing.T) {
 	assert.Equal(t, uint64(0), wt.SndSeqNum, "Token fields should not have been initialised")
 }
 
+func Test_Marshal_Unmarshal_Sealed_Roundtrip(t *testing.T) {
+	wt := WrapToken{
+		Flags:     byte(WrapTokenFlagSealed),
+		EC:        0,
+		RRC:       28,
+		SndSeqNum: 0,
+		Payload:   []byte("Hello world"),
+	}
+	sk := getSessionKey()
+	err := wt.EncryptPayload(sk, initiatorSeal)
+	assert.NoError(t, err, "Error encrypting payload")
+	b, err := wt.Marshal()
+	assert.NoError(t, err, "Error marshalling token")
+
+	var wt2 WrapToken
+	err = wt2.Unmarshal(b, false)
+	assert.NoError(t, err, "Error unmarshalling token")
+	err = wt2.DecryptPayload(sk, initiatorSeal)
+	assert.NoError(t, err, "Error decrypting payload")
+	assert.EqualValues(t, "Hello world", wt2.Payload, "Payload roundtrip failed")
+	assert.Equal(t, wt.Flags, wt2.Flags, "Flags roundtrip failed")
+	assert.Equal(t, wt.EC, wt2.EC, "EC roundtrip failed")
+	assert.Equal(t, wt.RRC, wt2.RRC, "RRC roundtrip failed")
+	assert.Equal(t, wt.SndSeqNum, wt2.SndSeqNum, "SendSeqNum roundtrip failed")
+}
+
 func TestChallengeChecksumVerification(t *testing.T) {
 	t.Parallel()
 	challenge, _ := hex.DecodeString(testChallengeFromAcceptor)
@@ -188,4 +215,44 @@ func TestNewInitiatorTokenSignatureAndMarshalling(t *testing.T) {
 	token, tErr := NewInitiatorWrapToken([]byte{0x01, 0x01, 0x00, 0x00}, getSessionKey())
 	assert.Nil(t, tErr, "Unexpected error.")
 	assert.Equal(t, getResponseReference(), token, "Token failed to be marshalled to the expected bytes.")
+}
+
+func Test_rotateRight(t *testing.T) {
+	t.Parallel()
+	t.Run("when n is < len(v)", func(t *testing.T) {
+		t.Parallel()
+		v := []byte{0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08}
+		v = rotateRight(v, 3)
+		if equal := bytes.Equal(v, []byte{0x06, 0x07, 0x08, 0x01, 0x02, 0x03, 0x04, 0x05}); !equal {
+			t.Error("rotateRight failed")
+		}
+	})
+	t.Run("when n is > len(v)", func(t *testing.T) {
+		t.Parallel()
+		v := []byte{0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08}
+		v = rotateRight(v, 10)
+		if equal := bytes.Equal(v, []byte{0x07, 0x08, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06}); !equal {
+			t.Error("rotateRight failed")
+		}
+	})
+}
+
+func Test_rotateLeft(t *testing.T) {
+	t.Parallel()
+	t.Run("when n is < len(v)", func(t *testing.T) {
+		t.Parallel()
+		v := []byte{0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08}
+		v = rotateLeft(v, 3)
+		if equal := bytes.Equal(v, []byte{0x04, 0x05, 0x06, 0x07, 0x08, 0x01, 0x02, 0x03}); !equal {
+			t.Error("rotateLeft failed")
+		}
+	})
+	t.Run("when n is > len(v)", func(t *testing.T) {
+		t.Parallel()
+		v := []byte{0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08}
+		v = rotateLeft(v, 10)
+		if equal := bytes.Equal(v, []byte{0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x01, 0x02}); !equal {
+			t.Error("rotateLeft failed")
+		}
+	})
 }

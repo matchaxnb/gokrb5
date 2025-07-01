@@ -10,9 +10,9 @@ import (
 	"github.com/jcmturner/gofork/encoding/asn1"
 	"github.com/matchaxnb/gokrb5/v8/asn1tools"
 	"github.com/matchaxnb/gokrb5/v8/client"
-	"github.com/matchaxnb/gokrb5/v8/credentials"
 	"github.com/matchaxnb/gokrb5/v8/gssapi"
 	"github.com/matchaxnb/gokrb5/v8/iana/chksumtype"
+	"github.com/matchaxnb/gokrb5/v8/iana/flags"
 	"github.com/matchaxnb/gokrb5/v8/iana/msgtype"
 	"github.com/matchaxnb/gokrb5/v8/krberror"
 	"github.com/matchaxnb/gokrb5/v8/messages"
@@ -22,9 +22,11 @@ import (
 
 // GSSAPI KRB5 MechToken IDs.
 const (
-	TOK_ID_KRB_AP_REQ = "0100"
-	TOK_ID_KRB_AP_REP = "0200"
-	TOK_ID_KRB_ERROR  = "0300"
+	TOK_ID_KRB_AP_REQ  = "0100"
+	TOK_ID_KRB_AP_REP  = "0200"
+	TOK_ID_KRB_TGT_REQ = "0400"
+	TOK_ID_KRB_TGT_REP = "0401"
+	TOK_ID_KRB_ERROR   = "0300"
 )
 
 // KRB5Token context token implementation for GSSAPI.
@@ -33,6 +35,8 @@ type KRB5Token struct {
 	tokID    []byte
 	APReq    messages.APReq
 	APRep    messages.APRep
+	TGTReq   messages.TGTReq
+	TGTRep   messages.TGTRep
 	KRBError messages.KRBError
 	settings *service.Settings
 	context  context.Context
@@ -53,6 +57,16 @@ func (m *KRB5Token) Marshal() ([]byte, error) {
 		}
 	case TOK_ID_KRB_AP_REP:
 		return []byte{}, errors.New("marshal of AP_REP GSSAPI MechToken not supported by gokrb5")
+	case TOK_ID_KRB_TGT_REQ:
+		tb, err = asn1.Marshal(m.TGTReq)
+		if err != nil {
+			return []byte{}, fmt.Errorf("error marshalling TGT_REQ for MechToken: %v", err)
+		}
+	case TOK_ID_KRB_TGT_REP:
+		tb, err = m.TGTRep.Marshal()
+		if err != nil {
+			return []byte{}, fmt.Errorf("error marshalling TGT_REP for MechToken: %v", err)
+		}
 	case TOK_ID_KRB_ERROR:
 		return []byte{}, errors.New("marshal of KRB_ERROR GSSAPI MechToken not supported by gokrb5")
 	}
@@ -70,8 +84,8 @@ func (m *KRB5Token) Unmarshal(b []byte) error {
 	if err != nil {
 		return fmt.Errorf("error unmarshalling KRB5Token OID: %v", err)
 	}
-	if !oid.Equal(gssapi.OIDKRB5.OID()) {
-		return fmt.Errorf("error unmarshalling KRB5Token, OID is %s not %s", oid.String(), gssapi.OIDKRB5.OID().String())
+	if !oid.Equal(gssapi.OIDKRB5.OID()) && !oid.Equal(gssapi.OIDKRB5User2User.OID()) {
+		return fmt.Errorf("error unmarshalling KRB5Token, OID is %s not %s or %s", oid.String(), gssapi.OIDKRB5.OID().String(), gssapi.OIDKRB5User2User.OID().String())
 	}
 	m.OID = oid
 	if len(r) < 2 {
@@ -93,6 +107,20 @@ func (m *KRB5Token) Unmarshal(b []byte) error {
 			return fmt.Errorf("error unmarshalling KRB5Token AP_REP: %v", err)
 		}
 		m.APRep = a
+	case TOK_ID_KRB_TGT_REQ:
+		var a messages.TGTReq
+		_, err := asn1.Unmarshal(r[2:], &a)
+		if err != nil {
+			return fmt.Errorf("error unmarshalling KRB5Token TGT_REQ: %v", err)
+		}
+		m.TGTReq = a
+	case TOK_ID_KRB_TGT_REP:
+		var a messages.TGTRep
+		err = a.Unmarshal(r[2:])
+		if err != nil {
+			return fmt.Errorf("error unmarshalling KRB5Token TGT_REP: %v", err)
+		}
+		m.TGTRep = a
 	case TOK_ID_KRB_ERROR:
 		var a messages.KRBError
 		err = a.Unmarshal(r[2:])
@@ -122,6 +150,14 @@ func (m *KRB5Token) Verify() (bool, gssapi.Status) {
 		// Client side
 		// TODO how to verify the AP_REP - not yet implemented
 		return false, gssapi.Status{Code: gssapi.StatusFailure, Message: "verifying an AP_REP is not currently supported by gokrb5"}
+	case TOK_ID_KRB_TGT_REQ:
+		// https://datatracker.ietf.org/doc/html/draft-ietf-cat-user2user-02#section-2
+		// specifies no verification for TGT_REQ
+		return true, gssapi.Status{Code: gssapi.StatusContinueNeeded}
+	case TOK_ID_KRB_TGT_REP:
+		// https://datatracker.ietf.org/doc/html/draft-ietf-cat-user2user-02#section-2
+		// specifies no verification for TGT_REP
+		return true, gssapi.Status{Code: gssapi.StatusContinueNeeded}
 	case TOK_ID_KRB_ERROR:
 		if m.KRBError.MsgType != msgtype.KRB_ERROR {
 			return false, gssapi.Status{Code: gssapi.StatusDefectiveToken, Message: "KRB5_Error token not valid"}
@@ -142,6 +178,22 @@ func (m *KRB5Token) IsAPReq() bool {
 // IsAPRep tests if the MechToken contains an AP_REP.
 func (m *KRB5Token) IsAPRep() bool {
 	if hex.EncodeToString(m.tokID) == TOK_ID_KRB_AP_REP {
+		return true
+	}
+	return false
+}
+
+// IsTGTReq tests if the MechToken contains an TGT_REQ.
+func (m *KRB5Token) IsTGTReq() bool {
+	if hex.EncodeToString(m.tokID) == TOK_ID_KRB_TGT_REQ {
+		return true
+	}
+	return false
+}
+
+// IsTGTRep tests if the MechToken contains an TGT_REP.
+func (m *KRB5Token) IsTGTRep() bool {
+	if hex.EncodeToString(m.tokID) == TOK_ID_KRB_TGT_REP {
 		return true
 	}
 	return false
@@ -168,7 +220,7 @@ func NewKRB5TokenAPREQ(cl *client.Client, tkt messages.Ticket, sessionKey types.
 	tb, _ := hex.DecodeString(TOK_ID_KRB_AP_REQ)
 	m.tokID = tb
 
-	auth, err := krb5TokenAuthenticator(cl.Credentials, GSSAPIFlags)
+	auth, err := krb5TokenAuthenticator(cl.Credentials.Realm(), cl.Credentials.CName(), GSSAPIFlags)
 	if err != nil {
 		return m, err
 	}
@@ -187,10 +239,81 @@ func NewKRB5TokenAPREQ(cl *client.Client, tkt messages.Ticket, sessionKey types.
 	return m, nil
 }
 
+// NewKRB5TokenTGTREQ creates a new KRB5 token with TGT_REQ.
+// Both serverName and realm are optional.
+// See https://datatracker.ietf.org/doc/html/draft-ietf-cat-user2user-02#section-2
+// for more information on these fields.
+func NewKRB5TokenTGTREQ(serverName types.PrincipalName, realm string) (KRB5Token, error) {
+	var m KRB5Token
+	m.OID = gssapi.OIDKRB5User2User.OID()
+	tb, _ := hex.DecodeString(TOK_ID_KRB_TGT_REQ)
+	m.tokID = tb
+
+	TGTReq := messages.TGTReq{
+		PVNO:       5,
+		MsgType:    msgtype.KRB_TGT_REQ,
+		ServerName: serverName,
+		Realm:      realm,
+	}
+	m.TGTReq = TGTReq
+	return m, nil
+}
+
+// NewKRB5TokenUser2UserAPREQ creates a new KRB5 token with AP_REQ for user-to-user authentication.
+func NewKRB5TokenUser2UserAPREQ(realm string, cname types.PrincipalName, tkt messages.Ticket, sessionKey types.EncryptionKey) (KRB5Token, error) {
+	var m KRB5Token
+	m.OID = gssapi.OIDKRB5User2User.OID()
+	tb, _ := hex.DecodeString(TOK_ID_KRB_AP_REQ)
+	m.tokID = tb
+	apREQFlags := []int{
+		// RFC 4120 Section 3.7
+		// When contacting the server using a ticket obtained for user-to-user
+		// authentication (message 3 in the table above), the client MUST
+		// specify the USE-SESSION-KEY flag in the ap-options field. This tells
+		// the application server to use the session key associated with its TGT
+		// to decrypt the server ticket provided in the application request.
+		flags.APOptionUseSessionKey,
+		// RFC 4120 Section 3.2.4
+		// Typically, a client’s request will include both the authentication
+		// information and its initial request in the same message, and the
+		// server need not explicitly reply to the KRB_AP_REQ. However, if
+		// mutual authentication (authenticating not only the client to the
+		// server, but also the server to the client) is being performed, the
+		// KRB_AP_REQ message will have MUTUAL-REQUIRED set in its ap-options
+		// field, and a KRB_AP_REP message is required in response.
+		flags.APOptionMutualRequired,
+	}
+	gssFlags := []int{
+		// Require mutual authentication
+		gssapi.ContextFlagMutual,
+		// Require confidentiality (encryption)
+		gssapi.ContextFlagConf,
+		// Require integrity (checksumming)
+		gssapi.ContextFlagInteg,
+	}
+	auth, err := krb5TokenAuthenticator(realm, cname, gssFlags)
+	if err != nil {
+		return m, err
+	}
+	APReq, err := messages.NewAPReq(
+		tkt,
+		sessionKey,
+		auth,
+	)
+	if err != nil {
+		return m, err
+	}
+	for _, o := range apREQFlags {
+		types.SetFlag(&APReq.APOptions, o)
+	}
+	m.APReq = APReq
+	return m, nil
+}
+
 // krb5TokenAuthenticator creates a new kerberos authenticator for kerberos MechToken
-func krb5TokenAuthenticator(creds *credentials.Credentials, flags []int) (types.Authenticator, error) {
+func krb5TokenAuthenticator(realm string, cname types.PrincipalName, flags []int) (types.Authenticator, error) {
 	//RFC 4121 Section 4.1.1
-	auth, err := types.NewAuthenticator(creds.Domain(), creds.CName())
+	auth, err := types.NewAuthenticator(realm, cname)
 	if err != nil {
 		return auth, krberror.Errorf(err, krberror.KRBMsgError, "error generating new authenticator")
 	}

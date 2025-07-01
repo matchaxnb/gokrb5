@@ -110,7 +110,7 @@ func (n *NegTokenInit) Verify() (bool, gssapi.Status) {
 	// Check if supported mechanisms are in the MechTypeList
 	var mtSupported bool
 	for _, m := range n.MechTypes {
-		if m.Equal(gssapi.OIDKRB5.OID()) || m.Equal(gssapi.OIDMSLegacyKRB5.OID()) {
+		if m.Equal(gssapi.OIDKRB5.OID()) || m.Equal(gssapi.OIDMSLegacyKRB5.OID()) || m.Equal(gssapi.OIDKRB5User2User.OID()) {
 			if n.mechToken == nil && n.MechTokenBytes == nil {
 				return false, gssapi.Status{Code: gssapi.StatusContinueNeeded}
 			}
@@ -132,7 +132,7 @@ func (n *NegTokenInit) Verify() (bool, gssapi.Status) {
 		n.mechToken = mt
 	} else {
 		var ok bool
-		mt, ok = n.mechToken.(*KRB5Token)
+		_, ok = n.mechToken.(*KRB5Token)
 		if !ok {
 			return false, gssapi.Status{Code: gssapi.StatusDefectiveToken, Message: "MechToken is not a KRB5 token as expected"}
 		}
@@ -197,7 +197,7 @@ func (n *NegTokenResp) Unmarshal(b []byte) error {
 
 // Verify a Resp/Targ negotiation token
 func (n *NegTokenResp) Verify() (bool, gssapi.Status) {
-	if n.SupportedMech.Equal(gssapi.OIDKRB5.OID()) || n.SupportedMech.Equal(gssapi.OIDMSLegacyKRB5.OID()) {
+	if n.SupportedMech.Equal(gssapi.OIDKRB5.OID()) || n.SupportedMech.Equal(gssapi.OIDMSLegacyKRB5.OID()) || n.SupportedMech.Equal(gssapi.OIDKRB5User2User.OID()) {
 		if n.mechToken == nil && n.ResponseToken == nil {
 			return false, gssapi.Status{Code: gssapi.StatusContinueNeeded}
 		}
@@ -240,6 +240,19 @@ func (n *NegTokenResp) Context() context.Context {
 		return mt.Context()
 	}
 	return nil
+}
+
+// MechToken gets the token embedded in the NegTokenResp.
+func (n *NegTokenResp) MechToken() (gssapi.ContextToken, error) {
+	if n.mechToken == nil {
+		mt := new(KRB5Token)
+		err := mt.Unmarshal(n.ResponseToken)
+		if err != nil {
+			return nil, gssapi.Status{Code: gssapi.StatusDefectiveToken, Message: err.Error()}
+		}
+		n.mechToken = mt
+	}
+	return n.mechToken, nil
 }
 
 // UnmarshalNegToken umarshals and returns either a NegTokenInit or a NegTokenResp.

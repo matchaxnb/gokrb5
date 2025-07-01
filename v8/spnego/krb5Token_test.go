@@ -9,6 +9,7 @@ import (
 	"github.com/matchaxnb/gokrb5/v8/client"
 	"github.com/matchaxnb/gokrb5/v8/credentials"
 	"github.com/matchaxnb/gokrb5/v8/gssapi"
+	"github.com/matchaxnb/gokrb5/v8/iana/flags"
 	"github.com/matchaxnb/gokrb5/v8/iana/msgtype"
 	"github.com/matchaxnb/gokrb5/v8/iana/nametype"
 	"github.com/matchaxnb/gokrb5/v8/messages"
@@ -57,7 +58,7 @@ func TestKRB5Token_newAuthenticatorWithSubkeyGeneration(t *testing.T) {
 	creds.SetCName(types.PrincipalName{NameType: nametype.KRB_NT_PRINCIPAL, NameString: testdata.TEST_PRINCIPALNAME_NAMESTRING})
 	var etypeID int32 = 18
 	keyLen := 32 // etypeID 18 refers to AES256 -> 32 bytes key
-	a, err := krb5TokenAuthenticator(creds, []int{gssapi.ContextFlagInteg, gssapi.ContextFlagConf})
+	a, err := krb5TokenAuthenticator(creds.Realm(), creds.CName(), []int{gssapi.ContextFlagInteg, gssapi.ContextFlagConf})
 	if err != nil {
 		t.Fatalf("Error creating authenticator: %v", err)
 	}
@@ -85,7 +86,7 @@ func TestKRB5Token_newAuthenticator(t *testing.T) {
 	t.Parallel()
 	creds := credentials.New("hftsai", testdata.TEST_REALM)
 	creds.SetCName(types.PrincipalName{NameType: nametype.KRB_NT_PRINCIPAL, NameString: testdata.TEST_PRINCIPALNAME_NAMESTRING})
-	a, err := krb5TokenAuthenticator(creds, []int{gssapi.ContextFlagInteg, gssapi.ContextFlagConf})
+	a, err := krb5TokenAuthenticator(creds.Realm(), creds.CName(), []int{gssapi.ContextFlagInteg, gssapi.ContextFlagConf})
 	if err != nil {
 		t.Fatalf("Error creating authenticator: %v", err)
 	}
@@ -143,4 +144,176 @@ func TestNewAPREQKRB5Token_and_Marshal(t *testing.T) {
 	assert.Equal(t, testdata.TEST_REALM, mt.APReq.Ticket.Realm, "Realm in ticket within the AP_REQ of the KRB5Token not as expected.")
 	assert.Equal(t, testdata.TEST_PRINCIPALNAME_NAMESTRING, mt.APReq.Ticket.SName.NameString, "SName in ticket within the AP_REQ of the KRB5Token not as expected.")
 	assert.Equal(t, int32(18), mt.APReq.EncryptedAuthenticator.EType, "Authenticator within AP_REQ does not have the etype expected.")
+}
+
+func TestNewKRB5TokenTGTREQ_and_Marshal(t *testing.T) {
+	t.Parallel()
+
+	t.Run("Marshal roundtrip", func(t *testing.T) {
+		t.Parallel()
+		serverName := types.PrincipalName{
+			NameType:   nametype.KRB_NT_PRINCIPAL,
+			NameString: testdata.TEST_PRINCIPALNAME_NAMESTRING,
+		}
+
+		mt, err := NewKRB5TokenTGTREQ(serverName, testdata.TEST_REALM)
+		if err != nil {
+			t.Fatalf("Error creating KRB5Token TGT_REQ: %v", err)
+		}
+
+		assert.Equal(t, gssapi.OIDKRB5User2User.OID(), mt.OID, "KRB5Token OID not as expected for TGT_REQ.")
+		assert.Equal(t, []byte{4, 0}, mt.tokID, "TokID not as expected for TGT_REQ")
+		assert.True(t, mt.IsTGTReq(), "Token should identify as TGT_REQ")
+		assert.Equal(t, 5, mt.TGTReq.PVNO, "TGT_REQ PVNO not as expected")
+		assert.Equal(t, msgtype.KRB_TGT_REQ, mt.TGTReq.MsgType, "TGT_REQ MsgType not as expected")
+		assert.Equal(t, serverName, mt.TGTReq.ServerName, "TGT_REQ ServerName not as expected")
+		assert.Equal(t, testdata.TEST_REALM, mt.TGTReq.Realm, "TGT_REQ Realm not as expected")
+
+		mb, err := mt.Marshal()
+		if err != nil {
+			t.Fatalf("Error marshalling KRB5Token TGT_REQ: %v", err)
+		}
+		var mt2 KRB5Token
+		err = mt2.Unmarshal(mb)
+		if err != nil {
+			t.Fatalf("Error unmarshalling KRB5Token TGT_REQ: %v", err)
+		}
+
+		assert.Equal(t, mt.OID, mt2.OID, "OID not preserved after marshal/unmarshal")
+		assert.Equal(t, mt.tokID, mt2.tokID, "TokID not preserved after marshal/unmarshal")
+		assert.Equal(t, mt.TGTReq.PVNO, mt2.TGTReq.PVNO, "TGT_REQ PVNO not preserved")
+		assert.Equal(t, mt.TGTReq.MsgType, mt2.TGTReq.MsgType, "TGT_REQ MsgType not preserved")
+		assert.Equal(t, mt.TGTReq.ServerName, mt2.TGTReq.ServerName, "TGT_REQ ServerName not preserved")
+		assert.Equal(t, mt.TGTReq.Realm, mt2.TGTReq.Realm, "TGT_REQ Realm not preserved")
+	})
+
+	t.Run("Optional fields", func(t *testing.T) {
+		t.Parallel()
+		mt, err := NewKRB5TokenTGTREQ(types.PrincipalName{}, "")
+		if err != nil {
+			t.Fatalf("Error creating KRB5Token TGT_REQ with empty fields: %v", err)
+		}
+		assert.Equal(t, gssapi.OIDKRB5User2User.OID(), mt.OID, "KRB5Token OID not as expected")
+		assert.Equal(t, []byte{4, 0}, mt.tokID, "TokID not as expected")
+		assert.Equal(t, 5, mt.TGTReq.PVNO, "TGT_REQ PVNO not as expected")
+		assert.Equal(t, msgtype.KRB_TGT_REQ, mt.TGTReq.MsgType, "TGT_REQ MsgType not as expected")
+		assert.Equal(t, types.PrincipalName{}, mt.TGTReq.ServerName, "TGT_REQ ServerName should be empty")
+		assert.Equal(t, "", mt.TGTReq.Realm, "TGT_REQ Realm should be empty")
+	})
+}
+
+func TestNewKRB5TokenUser2UserAPREQ(t *testing.T) {
+	t.Parallel()
+	cname := types.PrincipalName{
+		NameType:   nametype.KRB_NT_PRINCIPAL,
+		NameString: testdata.TEST_PRINCIPALNAME_NAMESTRING,
+	}
+	var tkt messages.Ticket
+	b, err := hex.DecodeString(testdata.MarshaledKRB5ticket)
+	if err != nil {
+		t.Fatalf("Test vector read error: %v", err)
+	}
+	err = tkt.Unmarshal(b)
+	if err != nil {
+		t.Fatalf("Unmarshal error: %v", err)
+	}
+	key := types.EncryptionKey{
+		KeyType:  18,
+		KeyValue: make([]byte, 32),
+	}
+	mt, err := NewKRB5TokenUser2UserAPREQ(testdata.TEST_REALM, cname, tkt, key)
+	if err != nil {
+		t.Fatalf("Error creating KRB5Token User2User AP_REQ: %v", err)
+	}
+
+	assert.Equal(t, gssapi.OIDKRB5User2User.OID(), mt.OID, "KRB5Token OID not as expected for User2User AP_REQ.")
+	assert.Equal(t, []byte{1, 0}, mt.tokID, "TokID not as expected for User2User AP_REQ")
+	assert.True(t, mt.IsAPReq(), "Token should identify as AP_REQ")
+	assert.Equal(t, msgtype.KRB_AP_REQ, mt.APReq.MsgType, "AP_REQ MsgType not as expected")
+	assert.True(t, types.IsFlagSet(&mt.APReq.APOptions, flags.APOptionUseSessionKey), "USE_SESSION_KEY flag should be set")
+	assert.True(t, types.IsFlagSet(&mt.APReq.APOptions, flags.APOptionMutualRequired), "MUTUAL_REQUIRED flag should be set")
+
+	mb, err := mt.Marshal()
+	if err != nil {
+		t.Fatalf("Error marshalling KRB5Token User2User AP_REQ: %v", err)
+	}
+	var mt2 KRB5Token
+	err = mt2.Unmarshal(mb)
+	if err != nil {
+		t.Fatalf("Error unmarshalling KRB5Token User2User AP_REQ: %v", err)
+	}
+
+	assert.Equal(t, mt.OID, mt2.OID, "OID not preserved after marshal/unmarshal")
+	assert.Equal(t, mt.tokID, mt2.tokID, "TokID not preserved after marshal/unmarshal")
+	assert.Equal(t, mt.APReq.MsgType, mt2.APReq.MsgType, "AP_REQ MsgType not preserved")
+	assert.Equal(t, mt.APReq.APOptions, mt2.APReq.APOptions, "AP_REQ APOptions not preserved")
+}
+
+func TestKRB5Token_TGT_REP_Marshal_Unmarshal(t *testing.T) {
+	t.Parallel()
+	// Create a KRB5Token with TGT_REP using an existing test vector
+	b, err := hex.DecodeString(testdata.MarshaledKRB5tgt_rep)
+	if err != nil {
+		t.Fatalf("Test vector read error: %v", err)
+	}
+	var tgtRep messages.TGTRep
+	err = tgtRep.Unmarshal(b)
+	if err != nil {
+		t.Fatalf("Unmarshal TGT_REP error: %v", err)
+	}
+
+	var mt KRB5Token
+	mt.OID = gssapi.OIDKRB5User2User.OID()
+	tb, _ := hex.DecodeString(TOK_ID_KRB_TGT_REP)
+	mt.tokID = tb
+	mt.TGTRep = tgtRep
+
+	assert.True(t, mt.IsTGTRep(), "Token should identify as TGT_REP")
+
+	mb, err := mt.Marshal()
+	if err != nil {
+		t.Fatalf("Error marshalling KRB5Token TGT_REP: %v", err)
+	}
+	var mt2 KRB5Token
+	err = mt2.Unmarshal(mb)
+	if err != nil {
+		t.Fatalf("Error unmarshalling KRB5Token TGT_REP: %v", err)
+	}
+
+	assert.Equal(t, mt.OID, mt2.OID, "OID not preserved after marshal/unmarshal")
+	assert.Equal(t, mt.tokID, mt2.tokID, "TokID not preserved after marshal/unmarshal")
+	assert.Equal(t, mt.TGTRep.PVNO, mt2.TGTRep.PVNO, "TGT_REP PVNO not preserved")
+	assert.Equal(t, mt.TGTRep.MsgType, mt2.TGTRep.MsgType, "TGT_REP MsgType not preserved")
+	assert.Equal(t, mt.TGTRep.Ticket.Realm, mt2.TGTRep.Ticket.Realm, "TGT_REP Ticket Realm not preserved")
+}
+
+func TestKRB5Token_Verify_TGT_Messages(t *testing.T) {
+	t.Parallel()
+
+	t.Run("TGT_REQ", func(t *testing.T) {
+		t.Parallel()
+		tgtReqToken, err := NewKRB5TokenTGTREQ(types.PrincipalName{}, "")
+		if err != nil {
+			t.Fatalf("Error creating TGT_REQ token: %v", err)
+		}
+
+		ok, status := tgtReqToken.Verify()
+		assert.True(t, ok, "TGT_REQ verification should succeed")
+		assert.Equal(t, gssapi.StatusContinueNeeded, status.Code, "TGT_REQ should return StatusContinueNeeded")
+	})
+
+	t.Run("TGT_REP", func(t *testing.T) {
+		var tgtRepToken KRB5Token
+		tgtRepToken.OID = gssapi.OIDKRB5User2User.OID()
+		tb, _ := hex.DecodeString(TOK_ID_KRB_TGT_REP)
+		tgtRepToken.tokID = tb
+		tgtRepToken.TGTRep = messages.TGTRep{
+			PVNO:    5,
+			MsgType: msgtype.KRB_TGT_REP,
+		}
+
+		ok, status := tgtRepToken.Verify()
+		assert.True(t, ok, "TGT_REP verification should succeed")
+		assert.Equal(t, gssapi.StatusContinueNeeded, status.Code, "TGT_REP should return StatusContinueNeeded")
+	})
 }

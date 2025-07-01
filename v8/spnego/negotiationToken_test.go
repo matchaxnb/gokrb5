@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/jcmturner/gofork/encoding/asn1"
+	"github.com/matchaxnb/gokrb5/v8/gssapi"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -104,4 +105,37 @@ func TestUnmarshal_negTokenInitWithReqFlags(t *testing.T) {
 	if len(m.MechTokenBytes) != 3 {
 		t.Errorf("unmarshal did not return the correct number of mechToken bytes")
 	}
+}
+
+func TestNegTokenResp_MechToken(t *testing.T) {
+	t.Parallel()
+	respTokenBytes, err := hex.DecodeString(KRB5TokenHex)
+	if err != nil {
+		t.Fatalf("Error decoding KRB5Token hex: %v", err)
+	}
+
+	nResp := &NegTokenResp{
+		NegState:      asn1.Enumerated(0),
+		SupportedMech: asn1.ObjectIdentifier{1, 2, 840, 113554, 1, 2, 2}, // Kerberos OID
+		ResponseToken: respTokenBytes,
+	}
+
+	mechToken, err := nResp.MechToken()
+	if err != nil {
+		t.Fatalf("Error getting MechToken: %v", err)
+	}
+
+	krb5Token, ok := mechToken.(*KRB5Token)
+	if !ok {
+		t.Fatalf("Expected KRB5Token, got %T", mechToken)
+	}
+
+	assert.Equal(t, gssapi.OIDKRB5.OID(), krb5Token.OID, "KRB5Token OID not as expected")
+	assert.True(t, krb5Token.IsAPReq(), "Expected KRB5Token to be an AP_REQ")
+
+	mechToken2, err := nResp.MechToken()
+	if err != nil {
+		t.Fatalf("Error getting MechToken on second call: %v", err)
+	}
+	assert.Same(t, mechToken, mechToken2, "Expected same token instance to be returned on subsequent calls")
 }

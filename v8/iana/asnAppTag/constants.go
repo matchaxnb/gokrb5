@@ -12,6 +12,8 @@ const (
 	TGSREP         = 13
 	APREQ          = 14
 	APREP          = 15
+	TGTREQ         = 16
+	TGTREP         = 17
 	KRBSafe        = 20
 	KRBPriv        = 21
 	KRBCred        = 22

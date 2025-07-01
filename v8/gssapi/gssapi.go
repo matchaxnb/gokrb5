@@ -11,10 +11,11 @@ import (
 // GSS-API OID names
 const (
 	// GSS-API OID names
-	OIDKRB5         OIDName = "KRB5"         // MechType OID for Kerberos 5
-	OIDMSLegacyKRB5 OIDName = "MSLegacyKRB5" // MechType OID for Kerberos 5
-	OIDSPNEGO       OIDName = "SPNEGO"
-	OIDGSSIAKerb    OIDName = "GSSIAKerb" // Indicates the client cannot get a service ticket and asks the server to serve as an intermediate to the target KDC. http://k5wiki.kerberos.org/wiki/Projects/IAKERB#IAKERB_mech
+	OIDKRB5          OIDName = "KRB5"          // MechType OID for Kerberos 5
+	OIDMSLegacyKRB5  OIDName = "MSLegacyKRB5"  // MechType OID for Kerberos 5
+	OIDKRB5User2User OIDName = "KRB5User2User" // MechType OIDC for Kerberos 5 User to User
+	OIDSPNEGO        OIDName = "SPNEGO"
+	OIDGSSIAKerb     OIDName = "GSSIAKerb" // Indicates the client cannot get a service ticket and asks the server to serve as an intermediate to the target KDC. http://k5wiki.kerberos.org/wiki/Projects/IAKERB#IAKERB_mech
 )
 
 // GSS-API status values
@@ -126,6 +127,8 @@ func (o OIDName) OID() asn1.ObjectIdentifier {
 		return asn1.ObjectIdentifier{1, 2, 840, 113554, 1, 2, 2}
 	case OIDMSLegacyKRB5:
 		return asn1.ObjectIdentifier{1, 2, 840, 48018, 1, 2, 2}
+	case OIDKRB5User2User:
+		return asn1.ObjectIdentifier{1, 2, 840, 113554, 1, 2, 2, 3}
 	case OIDGSSIAKerb:
 		return asn1.ObjectIdentifier{1, 3, 6, 1, 5, 2, 5}
 	}
